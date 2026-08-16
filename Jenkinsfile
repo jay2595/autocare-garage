@@ -48,6 +48,28 @@ pipeline {
             }
         }
 
+        stage('Code Analysis') {
+            steps {
+                // 'sonarqube' is the server name from Manage Jenkins > System.
+                // The wrapper injects SONAR_HOST_URL and SONAR_AUTH_TOKEN, which
+                // sonar-maven-plugin picks up on its own. No secrets in this file.
+                withSonarQubeEnv('sonarqube') {
+                    sh "${MVN} sonar:sonar"
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                // Blocks until SonarQube POSTs its verdict to the Jenkins webhook.
+                // abortPipeline:false = report only. Flip to true once you have seen
+                // the gate pass, so a real regression stops the build.
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: false
+                }
+            }
+        }
+
         stage('Archive JARs') {
             steps {
                 archiveArtifacts artifacts: '*/target/*.jar',

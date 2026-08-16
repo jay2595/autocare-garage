@@ -19,3 +19,6 @@ Thumbs.db
 
 *.log
 .scannerwork/
+
+# local Azure variable helper
+azvars.ps1
