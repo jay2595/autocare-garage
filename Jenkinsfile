@@ -1,8 +1,13 @@
 // AutoCare Garage - Build pipeline (CI)
 //
-// Stage 1 of the pipeline. Clones the repo, compiles all three modules and runs
-// the unit tests. Sonar, Docker, Trivy and the ACR push get added on top of this
-// once this much is proven green.
+// Clone -> build + unit test -> Sonar analysis + quality gate -> Docker images
+// -> Trivy scan -> push to Azure Container Registry.
+//
+// The three services are built in one Maven reactor pass, then each gets its own
+// image, scan and push. Every image is tagged with the Jenkins build number, which
+// is what the CD pipeline consumes.
+
+def SERVICES = ['customers-service', 'workshop-service', 'web-ui']
 
 pipeline {
 
@@ -15,7 +20,7 @@ pipeline {
 
     options {
         timestamps()
-        timeout(time: 30, unit: 'MINUTES')
+        timeout(time: 45, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '15'))
         disableConcurrentBuilds()
     }
@@ -25,6 +30,10 @@ pipeline {
         MAVEN_OPTS = '-Xmx1024m'
         // Quieter logs: batch mode, no dependency download spam
         MVN        = 'mvn -B -ntp'
+
+        ACR_NAME   = 'acrautocarejay2595'
+        ACR_LOGIN  = "${ACR_NAME}.azurecr.io"
+        IMAGE_TAG  = "${env.BUILD_NUMBER}"
     }
 
     stages {
@@ -77,16 +86,102 @@ pipeline {
                                  onlyIfSuccessful: true
             }
         }
+
+        stage('Docker Build') {
+            steps {
+                script {
+                    SERVICES.each { svc ->
+                        // Build context is the module folder. The Dockerfile only
+                        // copies the JAR Maven already produced - no second Maven
+                        // run inside Docker.
+                        sh "docker build -t ${ACR_LOGIN}/${svc}:${IMAGE_TAG} -t ${ACR_LOGIN}/${svc}:latest ./${svc}"
+                    }
+                    sh 'docker images --filter=reference="*/*:${IMAGE_TAG}" --format "{{.Repository}}:{{.Tag}}  {{.Size}}"'
+                }
+            }
+        }
+
+        stage('Trivy Scan') {
+            steps {
+                script {
+                    SERVICES.each { svc ->
+                        // --exit-code 0 = report but do not fail the build.
+                        // Change to 1 once you have seen the report and decided
+                        // which findings you are willing to block on.
+                        sh """
+                            trivy image \
+                              --scanners vuln \
+                              --severity HIGH,CRITICAL \
+                              --ignore-unfixed \
+                              --exit-code 0 \
+                              --format table \
+                              --output trivy-${svc}.txt \
+                              ${ACR_LOGIN}/${svc}:${IMAGE_TAG}
+                        """
+                        sh "echo '----- ${svc} -----'; cat trivy-${svc}.txt"
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'trivy-*.txt', allowEmptyResults: true
+                }
+            }
+        }
+
+        stage('Push to ACR') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'azure-client-id',     variable: 'AZ_CLIENT_ID'),
+                    string(credentialsId: 'azure-client-secret', variable: 'AZ_CLIENT_SECRET'),
+                    string(credentialsId: 'azure-tenant-id',     variable: 'AZ_TENANT_ID')
+                ]) {
+                    // Single quotes on purpose: Groovy must not interpolate the
+                    // secrets, or they end up readable in the pipeline script.
+                    sh '''
+                        az login --service-principal \
+                          -u "$AZ_CLIENT_ID" \
+                          -p "$AZ_CLIENT_SECRET" \
+                          --tenant "$AZ_TENANT_ID" \
+                          --only-show-errors > /dev/null
+
+                        az acr login --name "$ACR_NAME"
+                    '''
+
+                    script {
+                        SERVICES.each { svc ->
+                            sh "docker push ${ACR_LOGIN}/${svc}:${IMAGE_TAG}"
+                            sh "docker push ${ACR_LOGIN}/${svc}:latest"
+                        }
+                    }
+                }
+            }
+        }
     }
 
     post {
         success {
-            echo "Build #${env.BUILD_NUMBER} passed - three JARs produced."
+            echo """
+            ============================================================
+            Build #${env.BUILD_NUMBER} succeeded.
+
+            Images pushed to ${env.ACR_LOGIN}:
+              customers-service:${env.IMAGE_TAG}
+              workshop-service:${env.IMAGE_TAG}
+              web-ui:${env.IMAGE_TAG}
+
+            Feed tag ${env.IMAGE_TAG} to the CD pipeline to deploy.
+            ============================================================
+            """.stripIndent()
         }
         failure {
-            echo "Build #${env.BUILD_NUMBER} failed. Check the stage that went red."
+            echo "Build #${env.BUILD_NUMBER} failed. Check the red stage above."
         }
         always {
+            // Log out of Azure and reclaim disk. The VM has a 30GB OS disk and
+            // three Java images per build fills it faster than you would think.
+            sh 'az logout --only-show-errors || true'
+            sh 'docker image prune -f || true'
             cleanWs deleteDirs: true, notFailBuild: true
         }
     }
