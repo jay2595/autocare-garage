@@ -1,0 +1,8 @@
+# Everything the app owns lives in one namespace, so `kubectl delete ns autocare`
+# is a complete teardown and `kubectl get all -n autocare` is a complete inventory.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: autocare
+  labels:
+    app.kubernetes.io/part-of: autocare-garage

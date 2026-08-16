@@ -1,0 +1,95 @@
+# web-ui - Thymeleaf front end. Holds no data, calls both backends.
+# This is the only service reachable from outside the cluster, via the Ingress.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-ui
+  namespace: autocare
+  labels:
+    app: web-ui
+    app.kubernetes.io/part-of: autocare-garage
+spec:
+  # web-ui is stateless, so this one genuinely can scale. Two replicas also give
+  # you something to point at when asked what rolling updates protect.
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web-ui
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: web-ui
+    spec:
+      containers:
+        - name: web-ui
+          image: acrautocarejay2595.azurecr.io/web-ui:__IMAGE_TAG__
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: CUSTOMERS_SERVICE_URL
+              value: "http://customers-service:8081"
+            - name: WORKSHOP_SERVICE_URL
+              value: "http://workshop-service:8082"
+            - name: JAVA_OPTS
+              value: "-XX:MaxRAMPercentage=70.0"
+          resources:
+            requests:
+              memory: "448Mi"
+              cpu: "150m"
+            limits:
+              memory: "640Mi"
+              cpu: "500m"
+
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 20
+
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-ui
+  namespace: autocare
+  labels:
+    app: web-ui
+spec:
+  type: ClusterIP
+  selector:
+    app: web-ui
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

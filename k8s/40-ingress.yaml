@@ -1,0 +1,58 @@
+# Single public entry point. One Azure Load Balancer IP, routed by path.
+#
+#   /                -> web-ui:8080          (the site)
+#   /api/customers   -> customers-service    (exposed so you can curl it in a demo)
+#   /api/vehicles    -> customers-service
+#   /api/workshop    -> workshop-service
+#
+# Only web-ui strictly needs to be public. The API paths are here so you can prove
+# during a demo that each service is independently alive.
+#
+# Order matters: NGINX matches the longest prefix, so the /api rules win over /
+# regardless of their position, but listing them first keeps it readable.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: autocare
+  namespace: autocare
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "8m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+spec:
+  # Provided by the AKS application routing add-on (az aks approuting enable).
+  ingressClassName: webapprouting.kubernetes.azure.com
+  rules:
+    - http:
+        paths:
+          - path: /api/customers
+            pathType: Prefix
+            backend:
+              service:
+                name: customers-service
+                port:
+                  number: 8081
+
+          - path: /api/vehicles
+            pathType: Prefix
+            backend:
+              service:
+                name: customers-service
+                port:
+                  number: 8081
+
+          - path: /api/workshop
+            pathType: Prefix
+            backend:
+              service:
+                name: workshop-service
+                port:
+                  number: 8082
+
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web-ui
+                port:
+                  number: 8080

@@ -1,0 +1,97 @@
+# customers-service - owns customers and vehicles.
+# No downstream dependencies, so this one starts first and everything else waits
+# on it implicitly via readiness probes.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customers-service
+  namespace: autocare
+  labels:
+    app: customers-service
+    app.kubernetes.io/part-of: autocare-garage
+spec:
+  # One replica: each pod holds its own in-memory H2 database, so two replicas
+  # would serve divergent data. Swap to PostgreSQL before scaling this up.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: customers-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: customers-service
+    spec:
+      containers:
+        - name: customers-service
+          image: acrautocarejay2595.azurecr.io/customers-service:__IMAGE_TAG__
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            - name: JAVA_OPTS
+              value: "-XX:MaxRAMPercentage=70.0"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "150m"
+            limits:
+              memory: "768Mi"
+              cpu: "500m"
+
+          # Spring Boot takes ~20s to start. The startup probe gives it up to
+          # 100s (20 x 5s) before liveness begins policing it. Without this,
+          # liveness would kill the pod mid-boot and loop forever.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 20
+
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: customers-service
+  namespace: autocare
+  labels:
+    app: customers-service
+spec:
+  # ClusterIP: reachable inside the cluster as http://customers-service:8081
+  # That DNS name is what workshop-service and web-ui are configured with.
+  type: ClusterIP
+  selector:
+    app: customers-service
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
