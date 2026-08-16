@@ -1,0 +1,125 @@
+# PostgreSQL for customers-service.
+#
+# One database per service. A shared instance would be cheaper, but it would also
+# mean two services able to read each other's tables - which is precisely the
+# coupling this architecture exists to avoid.
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-customers
+  namespace: autocare
+type: Opaque
+stringData:
+  username: autocare
+  # Substituted by the CD pipeline from the Jenkins 'postgres-password'
+  # credential. The real value is never committed.
+  password: __DB_PASSWORD__
+  database: customersdb
+
+---
+# Headless service: required by the StatefulSet for stable pod DNS.
+# Applications connect to postgres-customers:5432.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-customers
+  namespace: autocare
+  labels:
+    app: postgres-customers
+spec:
+  clusterIP: None
+  selector:
+    app: postgres-customers
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-customers
+  namespace: autocare
+  labels:
+    app: postgres-customers
+    app.kubernetes.io/part-of: autocare-garage
+spec:
+  serviceName: postgres-customers
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-customers
+  template:
+    metadata:
+      labels:
+        app: postgres-customers
+    spec:
+      securityContext:
+        # 999 is the postgres group inside the official image. Without this the
+        # mounted Azure disk is owned by root and initdb refuses to run.
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-customers
+                  key: database
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-customers
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-customers
+                  key: password
+            # Azure disks arrive with a lost+found directory at the mount root.
+            # initdb refuses to initialise a non-empty directory, so PGDATA must
+            # point at a subdirectory. This is the single most common reason a
+            # Postgres StatefulSet crashloops on a cloud provider.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+            initialDelaySeconds: 40
+            periodSeconds: 20
+            timeoutSeconds: 5
+
+  # A StatefulSet's volumeClaimTemplate creates one PVC per replica and keeps it
+  # bound to that pod across restarts and rescheduling. This is the difference
+  # between a StatefulSet and a Deployment, and the reason databases use one.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: managed-csi
+        resources:
+          requests:
+            storage: 8Gi

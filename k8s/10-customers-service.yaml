@@ -27,6 +27,20 @@ spec:
       labels:
         app: customers-service
     spec:
+      initContainers:
+        # Spring Boot exits if it cannot reach the database on startup, and a
+        # crashlooping app pod is a much noisier failure than a pending init
+        # container. Wait for Postgres to accept connections first.
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres-customers -p 5432; do
+                echo "waiting for postgres-customers..."
+                sleep 3
+              done
       containers:
         - name: customers-service
           image: acrautocarejay2595.azurecr.io/customers-service:__IMAGE_TAG__
@@ -35,6 +49,26 @@ spec:
             - name: http
               containerPort: 8081
           env:
+            # PostgreSQL connection. The image has no idea it is talking to Postgres
+            # rather than H2 - that is decided entirely by these variables.
+            - name: DB_URL
+              value: "jdbc:postgresql://postgres-customers:5432/customersdb"
+            - name: DB_DRIVER
+              value: "org.postgresql.Driver"
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-customers
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-customers
+                  key: password
+            # update, not create-drop: the schema and the data must survive a
+            # pod restart now that there is somewhere to survive to.
+            - name: DDL_AUTO
+              value: "update"
             - name: JAVA_OPTS
               value: "-XX:MaxRAMPercentage=70.0"
           resources:

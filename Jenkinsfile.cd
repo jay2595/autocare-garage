@@ -112,16 +112,45 @@ pipeline {
 
         stage('Apply manifests') {
             steps {
+                // Rendered manifests contain the database password, so the whole
+                // stage runs inside withCredentials and the directory is deleted
+                // in post{always} by cleanWs.
+                withCredentials([
+                    string(credentialsId: 'postgres-password', variable: 'DB_PASSWORD')
+                ]) {
+                    sh """
+                        # Substitute into a throwaway copy. The manifests in git keep
+                        # their placeholders, so the repo never carries a version
+                        # number or a secret.
+                        rm -rf k8s-rendered && cp -r k8s k8s-rendered
+                        sed -i 's|__IMAGE_TAG__|${params.IMAGE_TAG}|g' k8s-rendered/*.yaml
+                    """
+
+                    // Single quotes: the password must not be interpolated by
+                    // Groovy into text that Jenkins will log.
+                    sh '''
+                        sed -i "s|__DB_PASSWORD__|$DB_PASSWORD|g" k8s-rendered/*.yaml
+                        chmod -R go-rwx k8s-rendered
+                    '''
+
+                    sh """
+                        echo '--- images being applied ---'
+                        grep -h 'image:' k8s-rendered/*.yaml
+
+                        kubectl apply -f k8s-rendered/
+                    """
+                }
+            }
+        }
+
+        stage('Wait for databases') {
+            steps {
+                // The app pods have an init container that waits for Postgres, but
+                // waiting here too turns a confusing 4-minute rollout timeout into
+                // a clear "the database never came up".
                 sh """
-                    # Substitute the tag into a throwaway copy. The manifests in git
-                    # keep the placeholder, so the repo never claims a version.
-                    rm -rf k8s-rendered && cp -r k8s k8s-rendered
-                    sed -i 's|__IMAGE_TAG__|${params.IMAGE_TAG}|g' k8s-rendered/*.yaml
-
-                    echo '--- images being applied ---'
-                    grep -h 'image:' k8s-rendered/*.yaml
-
-                    kubectl apply -f k8s-rendered/
+                    kubectl rollout status statefulset/postgres-customers -n ${NS} --timeout=300s
+                    kubectl rollout status statefulset/postgres-workshop  -n ${NS} --timeout=300s
                 """
             }
         }

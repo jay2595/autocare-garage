@@ -4,14 +4,22 @@ server:
 spring:
   application:
     name: customers-service
+  # Datasource is entirely environment driven. With no variables set it falls
+  # back to in-memory H2, so local development and tests need no database.
+  # In Kubernetes the Deployment supplies PostgreSQL values from a Secret.
   datasource:
-    url: jdbc:h2:mem:customersdb;DB_CLOSE_DELAY=-1
-    driver-class-name: org.h2.Driver
-    username: sa
-    password: ""
+    url: ${DB_URL:jdbc:h2:mem:customersdb;DB_CLOSE_DELAY=-1}
+    driver-class-name: ${DB_DRIVER:org.h2.Driver}
+    username: ${DB_USERNAME:sa}
+    password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      connection-timeout: 10000
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      # create-drop for throwaway H2, update for a real database that must
+      # survive a pod restart.
+      ddl-auto: ${DDL_AUTO:create-drop}
     open-in-view: false
   h2:
     console:

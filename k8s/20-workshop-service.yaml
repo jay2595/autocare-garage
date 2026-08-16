@@ -24,6 +24,20 @@ spec:
       labels:
         app: workshop-service
     spec:
+      initContainers:
+        # Spring Boot exits if it cannot reach the database on startup, and a
+        # crashlooping app pod is a much noisier failure than a pending init
+        # container. Wait for Postgres to accept connections first.
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres-workshop -p 5432; do
+                echo "waiting for postgres-workshop..."
+                sleep 3
+              done
       containers:
         - name: workshop-service
           image: acrautocarejay2595.azurecr.io/workshop-service:__IMAGE_TAG__
@@ -32,6 +46,26 @@ spec:
             - name: http
               containerPort: 8082
           env:
+            # PostgreSQL connection. The image has no idea it is talking to Postgres
+            # rather than H2 - that is decided entirely by these variables.
+            - name: DB_URL
+              value: "jdbc:postgresql://postgres-workshop:5432/workshopdb"
+            - name: DB_DRIVER
+              value: "org.postgresql.Driver"
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-workshop
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-workshop
+                  key: password
+            # update, not create-drop: the schema and the data must survive a
+            # pod restart now that there is somewhere to survive to.
+            - name: DDL_AUTO
+              value: "update"
             # No hostnames hardcoded in the image - the same image runs locally
             # against localhost:8081 and here against cluster DNS.
             - name: CUSTOMERS_SERVICE_URL
