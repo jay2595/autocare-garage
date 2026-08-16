@@ -124,7 +124,7 @@ pipeline {
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'trivy-*.txt', allowEmptyResults: true
+                    archiveArtifacts artifacts: 'trivy-*.txt', allowEmptyArchive: true
                 }
             }
         }
