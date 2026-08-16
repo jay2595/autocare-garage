@@ -1,0 +1,37 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: web-ui
+  thymeleaf:
+    cache: false
+
+autocare:
+  customers-service:
+    url: ${CUSTOMERS_SERVICE_URL:http://localhost:8081}
+  workshop-service:
+    url: ${WORKSHOP_SERVICE_URL:http://localhost:8082}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: AutoCare Web UI
+    description: Front end for the AutoCare Garage platform
+
+logging:
+  level:
+    com.autocare: INFO

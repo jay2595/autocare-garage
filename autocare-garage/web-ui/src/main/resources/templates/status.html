@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Services')}"></head>
+<body class="min-h-screen bg-ink-900 font-sans text-zinc-300 antialiased">
+
+<header th:replace="~{fragments/layout :: nav('status')}"></header>
+
+<main class="mx-auto max-w-4xl px-6 py-10">
+
+    <p class="font-mono text-[11px] uppercase tracking-[0.22em] text-amber-500">Platform</p>
+    <h1 class="mt-1 text-2xl font-bold tracking-tight text-zinc-50">Service health</h1>
+    <p class="mt-2 text-sm text-zinc-500">
+        Each tile is a live call to that service&rsquo;s <span class="font-mono text-zinc-400">/actuator/health</span>.
+        Kill a pod and refresh &mdash; the tile turns red, and the rest of the app keeps working.
+    </p>
+
+    <div class="mt-8 grid gap-3 sm:grid-cols-3">
+        <div class="rounded-sm border border-line bg-ink-800 p-6">
+            <div class="flex items-center gap-2.5">
+                <span class="h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
+                <p class="font-mono text-sm text-zinc-100">web-ui</p>
+            </div>
+            <p class="mt-3 font-mono text-[10px] uppercase tracking-[0.15em] text-emerald-500">up · :8080</p>
+            <p class="mt-1 text-xs text-zinc-600">You are looking at it.</p>
+        </div>
+
+        <div class="rounded-sm border border-line bg-ink-800 p-6">
+            <div class="flex items-center gap-2.5">
+                <span class="h-2.5 w-2.5 rounded-full"
+                      th:classappend="${customersUp} ? 'bg-emerald-500' : 'bg-red-500'"></span>
+                <p class="font-mono text-sm text-zinc-100">customers-service</p>
+            </div>
+            <p class="mt-3 font-mono text-[10px] uppercase tracking-[0.15em]"
+               th:classappend="${customersUp} ? 'text-emerald-500' : 'text-red-500'"
+               th:text="${customersUp} ? 'up · :8081' : 'down'">up</p>
+            <p class="mt-1 text-xs text-zinc-600">Customers and vehicles.</p>
+        </div>
+
+        <div class="rounded-sm border border-line bg-ink-800 p-6">
+            <div class="flex items-center gap-2.5">
+                <span class="h-2.5 w-2.5 rounded-full"
+                      th:classappend="${workshopUp} ? 'bg-emerald-500' : 'bg-red-500'"></span>
+                <p class="font-mono text-sm text-zinc-100">workshop-service</p>
+            </div>
+            <p class="mt-3 font-mono text-[10px] uppercase tracking-[0.15em]"
+               th:classappend="${workshopUp} ? 'text-emerald-500' : 'text-red-500'"
+               th:text="${workshopUp} ? 'up · :8082' : 'down'">up</p>
+            <p class="mt-1 text-xs text-zinc-600">Mechanics and jobs.</p>
+        </div>
+    </div>
+
+    <div class="mt-8 rounded-sm border border-line bg-ink-800 p-6">
+        <h2 class="mb-4 font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Jobs by status</h2>
+        <div class="grid grid-cols-2 gap-px bg-line sm:grid-cols-5">
+            <div class="bg-ink-800 px-4 py-4" th:each="entry : ${stats.byStatus()}">
+                <p class="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500"
+                   th:text="${#strings.replace(entry.key, '_', ' ')}">STATUS</p>
+                <p class="mt-1 font-mono text-2xl font-bold text-zinc-100" th:text="${entry.value}">0</p>
+            </div>
+        </div>
+        <p class="mt-4 font-mono text-[11px] text-zinc-600">
+            workshop-service &rarr; customers-service link:
+            <span th:classappend="${stats.customersServiceReachable()} ? 'text-emerald-500' : 'text-red-500'"
+                  th:text="${stats.customersServiceReachable()} ? 'OK' : 'BROKEN'">OK</span>
+        </p>
+    </div>
+
+</main>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+</body>
+</html>

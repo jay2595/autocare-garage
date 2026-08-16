@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Dashboard')}"></head>
+<body class="min-h-screen bg-ink-900 font-sans text-zinc-300 antialiased">
+
+<header th:replace="~{fragments/layout :: nav('dashboard')}"></header>
+<div th:replace="~{fragments/layout :: flash}"></div>
+
+<main class="mx-auto max-w-7xl px-6 py-10">
+
+    <section class="grid-lines mb-10 rounded-sm border border-line bg-ink-800/60 p-8">
+        <p class="font-mono text-[11px] uppercase tracking-[0.22em] text-amber-500">Workshop floor</p>
+        <h1 class="mt-2 text-3xl font-bold tracking-tight text-zinc-50">Today at the garage</h1>
+        <p class="mt-2 max-w-2xl text-sm text-zinc-500">
+            Live view across all three services. Vehicle details are resolved from
+            <span class="font-mono text-zinc-400">customers-service</span> at request time.
+        </p>
+    </section>
+
+    <section class="mb-10 grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <div class="rounded-sm border border-line bg-ink-800 p-5">
+            <p class="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Open jobs</p>
+            <p class="mt-2 font-mono text-3xl font-bold text-amber-500" th:text="${stats.open()}">0</p>
+        </div>
+        <div class="rounded-sm border border-line bg-ink-800 p-5">
+            <p class="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Total jobs</p>
+            <p class="mt-2 font-mono text-3xl font-bold text-zinc-100" th:text="${stats.total()}">0</p>
+        </div>
+        <div class="rounded-sm border border-line bg-ink-800 p-5">
+            <p class="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Customers</p>
+            <p class="mt-2 font-mono text-3xl font-bold text-zinc-100" th:text="${customerCount}">0</p>
+        </div>
+        <div class="rounded-sm border border-line bg-ink-800 p-5">
+            <p class="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Vehicles</p>
+            <p class="mt-2 font-mono text-3xl font-bold text-zinc-100" th:text="${vehicleCount}">0</p>
+        </div>
+        <div class="rounded-sm border border-line bg-ink-800 p-5">
+            <p class="font-mono text-[10px] uppercase tracking-[0.18em] text-zinc-500">Mechanics</p>
+            <p class="mt-2 font-mono text-3xl font-bold text-zinc-100" th:text="${mechanicCount}">0</p>
+        </div>
+    </section>
+
+    <section class="mb-10 grid gap-3 sm:grid-cols-2">
+        <div class="flex items-center gap-3 rounded-sm border border-line bg-ink-800 px-5 py-4">
+            <span class="h-2.5 w-2.5 rounded-full"
+                  th:classappend="${customersUp} ? 'bg-emerald-500' : 'bg-red-500'"></span>
+            <div>
+                <p class="font-mono text-xs text-zinc-300">customers-service</p>
+                <p class="font-mono text-[10px] uppercase tracking-[0.15em]"
+                   th:classappend="${customersUp} ? 'text-emerald-500' : 'text-red-500'"
+                   th:text="${customersUp} ? 'reachable · :8081' : 'unreachable'">reachable</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-3 rounded-sm border border-line bg-ink-800 px-5 py-4">
+            <span class="h-2.5 w-2.5 rounded-full"
+                  th:classappend="${workshopUp} ? 'bg-emerald-500' : 'bg-red-500'"></span>
+            <div>
+                <p class="font-mono text-xs text-zinc-300">workshop-service</p>
+                <p class="font-mono text-[10px] uppercase tracking-[0.15em]"
+                   th:classappend="${workshopUp} ? 'text-emerald-500' : 'text-red-500'"
+                   th:text="${workshopUp} ? 'reachable · :8082' : 'unreachable'">reachable</p>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <div class="mb-4 flex items-baseline justify-between">
+            <h2 class="text-lg font-semibold tracking-tight text-zinc-100">Latest jobs</h2>
+            <a href="/jobs" class="font-mono text-[11px] uppercase tracking-[0.15em] text-amber-500 hover:text-amber-400">
+                Full job board &rarr;
+            </a>
+        </div>
+
+        <div th:if="${#lists.isEmpty(recentJobs)}"
+             class="rounded-sm border border-dashed border-line bg-ink-800/40 px-6 py-12 text-center text-sm text-zinc-500">
+            No jobs to show. Either the workshop is quiet, or
+            <span class="font-mono text-zinc-400">workshop-service</span> is not reachable.
+        </div>
+
+        <div class="space-y-2">
+            <a th:each="job : ${recentJobs}" th:href="@{'/jobs/' + ${job.id()}}"
+               class="flex items-center gap-5 rounded-sm border border-line border-l-4 bg-ink-800 px-5 py-4 transition hover:border-zinc-600 hover:bg-ink-700"
+               th:classappend="${job.accentClass()}">
+                <span class="font-mono text-xs text-zinc-600" th:text="'#' + ${job.id()}">#1</span>
+                <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm font-medium text-zinc-100" th:text="${job.description()}">Job</p>
+                    <p class="mt-0.5 font-mono text-[11px] text-zinc-500">
+                        <span th:text="${job.vehicleLabel()}">Vehicle</span>
+                        <span class="text-zinc-700"> / </span>
+                        <span th:text="${job.registration()}">REG</span>
+                    </p>
+                </div>
+                <span class="hidden font-mono text-[11px] text-zinc-500 sm:inline"
+                      th:text="${job.mechanicName()} ?: 'unassigned'">Mechanic</span>
+                <span class="rounded-sm px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] ring-1"
+                      th:classappend="${job.badgeClass()}" th:text="${job.statusLabel()}">Status</span>
+            </a>
+        </div>
+    </section>
+
+</main>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Customer')}"></head>
+<body class="min-h-screen bg-ink-900 font-sans text-zinc-300 antialiased">
+
+<header th:replace="~{fragments/layout :: nav('customers')}"></header>
+<div th:replace="~{fragments/layout :: flash}"></div>
+
+<main class="mx-auto max-w-5xl px-6 py-10">
+
+    <a href="/customers" class="font-mono text-[11px] uppercase tracking-[0.15em] text-zinc-500 hover:text-amber-500">
+        &larr; Customers
+    </a>
+
+    <div class="mt-4 flex items-center gap-5 rounded-sm border border-line bg-ink-800 p-7">
+        <span class="flex h-16 w-16 items-center justify-center rounded-sm border border-line bg-ink-700 font-mono text-xl font-bold text-amber-500"
+              th:text="${customer.initials()}">PS</span>
+        <div>
+            <h1 class="text-2xl font-bold tracking-tight text-zinc-50" th:text="${customer.fullName()}">Name</h1>
+            <p class="mt-1 font-mono text-xs text-zinc-500">
+                <span th:text="${customer.phone()}">phone</span>
+                <span class="text-zinc-700"> · </span>
+                <span th:text="${customer.email()} ?: 'no email'">email</span>
+            </p>
+            <p class="mt-0.5 font-mono text-xs text-zinc-600"
+               th:text="(${customer.address()} ?: '') + ' ' + (${customer.city()} ?: '')">address</p>
+        </div>
+    </div>
+
+    <h2 class="mb-3 mt-10 text-lg font-semibold tracking-tight text-zinc-100">Vehicles</h2>
+
+    <div th:if="${#lists.isEmpty(customer.vehicles())}"
+         class="rounded-sm border border-dashed border-line px-6 py-10 text-center text-sm text-zinc-500">
+        No vehicles on file.
+    </div>
+
+    <div class="overflow-hidden rounded-sm border border-line" th:unless="${#lists.isEmpty(customer.vehicles())}">
+        <table class="w-full text-left text-sm">
+            <thead class="bg-ink-700">
+            <tr class="font-mono text-[10px] uppercase tracking-[0.15em] text-zinc-500">
+                <th class="px-4 py-3 font-medium">Vehicle</th>
+                <th class="px-4 py-3 font-medium">Registration</th>
+                <th class="hidden px-4 py-3 font-medium md:table-cell">VIN</th>
+                <th class="px-4 py-3 text-right font-medium">Mileage</th>
+            </tr>
+            </thead>
+            <tbody class="divide-y divide-line bg-ink-800">
+            <tr th:each="v : ${customer.vehicles()}">
+                <td class="px-4 py-3 text-zinc-100" th:text="${v.label()}">Vehicle</td>
+                <td class="px-4 py-3 font-mono text-xs text-amber-500" th:text="${v.registrationNumber()}">REG</td>
+                <td class="hidden px-4 py-3 font-mono text-xs text-zinc-600 md:table-cell" th:text="${v.vin()} ?: '-'">VIN</td>
+                <td class="px-4 py-3 text-right font-mono text-xs text-zinc-400"
+                    th:text="${v.mileageLabel()}">0</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h2 class="mb-3 mt-10 text-lg font-semibold tracking-tight text-zinc-100">Service history</h2>
+
+    <div th:if="${#lists.isEmpty(jobs)}"
+         class="rounded-sm border border-dashed border-line px-6 py-10 text-center text-sm text-zinc-500">
+        No jobs recorded for this customer.
+    </div>
+
+    <div class="space-y-2">
+        <a th:each="job : ${jobs}" th:href="@{'/jobs/' + ${job.id()}}"
+           class="flex items-center gap-5 rounded-sm border border-line border-l-4 bg-ink-800 px-5 py-4 transition hover:bg-ink-700"
+           th:classappend="${job.accentClass()}">
+            <span class="font-mono text-xs text-zinc-600" th:text="'#' + ${job.id()}">#1</span>
+            <p class="min-w-0 flex-1 truncate text-sm text-zinc-100" th:text="${job.description()}">Job</p>
+            <span class="rounded-sm px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] ring-1"
+                  th:classappend="${job.badgeClass()}" th:text="${job.statusLabel()}">Status</span>
+        </a>
+    </div>
+
+</main>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+</body>
+</html>

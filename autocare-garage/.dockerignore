@@ -1,0 +1,5 @@
+.git
+.idea
+*.md
+k8s
+docker-compose.yml

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Job board')}"></head>
+<body class="min-h-screen bg-ink-900 font-sans text-zinc-300 antialiased">
+
+<header th:replace="~{fragments/layout :: nav('jobs')}"></header>
+<div th:replace="~{fragments/layout :: flash}"></div>
+
+<main class="mx-auto max-w-7xl px-6 py-10">
+
+    <div class="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <div>
+            <p class="font-mono text-[11px] uppercase tracking-[0.22em] text-amber-500">workshop-service</p>
+            <h1 class="mt-1 text-2xl font-bold tracking-tight text-zinc-50">Job board</h1>
+        </div>
+        <a href="/jobs/new"
+           class="rounded-sm border border-line bg-ink-800 px-4 py-2 text-sm font-medium text-zinc-200 transition hover:border-amber-600 hover:text-amber-400">
+            + Book a job
+        </a>
+    </div>
+
+    <div class="mb-6 flex flex-wrap gap-2">
+        <a href="/jobs"
+           class="rounded-sm border border-line px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.12em] transition hover:border-zinc-600"
+           th:classappend="${selectedStatus == null} ? 'bg-amber-500 text-ink-950 border-amber-500' : 'text-zinc-400'">
+            All <span th:text="'(' + ${stats.total()} + ')'"></span>
+        </a>
+        <a th:each="s : ${statuses}" th:href="@{'/jobs?status=' + ${s}}"
+           class="rounded-sm border border-line px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.12em] transition hover:border-zinc-600"
+           th:classappend="${selectedStatus == s} ? 'bg-amber-500 text-ink-950 border-amber-500' : 'text-zinc-400'">
+            <span th:text="${#strings.replace(s, '_', ' ')}">STATUS</span>
+            <span th:text="'(' + ${stats.count(s)} + ')'"></span>
+        </a>
+    </div>
+
+    <div th:if="${#lists.isEmpty(jobs)}"
+         class="rounded-sm border border-dashed border-line bg-ink-800/40 px-6 py-16 text-center text-sm text-zinc-500">
+        Nothing here.
+    </div>
+
+    <div class="overflow-hidden rounded-sm border border-line" th:unless="${#lists.isEmpty(jobs)}">
+        <table class="w-full text-left text-sm">
+            <thead class="bg-ink-700">
+            <tr class="font-mono text-[10px] uppercase tracking-[0.15em] text-zinc-500">
+                <th class="px-4 py-3 font-medium">Job</th>
+                <th class="px-4 py-3 font-medium">Vehicle</th>
+                <th class="hidden px-4 py-3 font-medium md:table-cell">Reg</th>
+                <th class="hidden px-4 py-3 font-medium lg:table-cell">Mechanic</th>
+                <th class="px-4 py-3 text-right font-medium">Est.</th>
+                <th class="px-4 py-3 font-medium">Status</th>
+            </tr>
+            </thead>
+            <tbody class="divide-y divide-line bg-ink-800">
+            <tr th:each="job : ${jobs}" class="border-l-4 transition hover:bg-ink-700"
+                th:classappend="${job.accentClass()}">
+                <td class="px-4 py-3">
+                    <a th:href="@{'/jobs/' + ${job.id()}}" class="group">
+                        <span class="font-mono text-[11px] text-zinc-600" th:text="'#' + ${job.id()}">#1</span>
+                        <p class="max-w-sm truncate text-zinc-100 group-hover:text-amber-400"
+                           th:text="${job.description()}">Description</p>
+                    </a>
+                </td>
+                <td class="px-4 py-3 text-zinc-400" th:text="${job.vehicleLabel()}">Vehicle</td>
+                <td class="hidden px-4 py-3 font-mono text-xs text-zinc-500 md:table-cell"
+                    th:text="${job.registration()}">REG</td>
+                <td class="hidden px-4 py-3 text-zinc-400 lg:table-cell"
+                    th:text="${job.mechanicName()} ?: '-'">Mechanic</td>
+                <td class="px-4 py-3 text-right font-mono text-xs text-zinc-300"
+                    th:text="${job.costLabel()}">-</td>
+                <td class="px-4 py-3">
+                    <span class="rounded-sm px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] ring-1"
+                          th:classappend="${job.badgeClass()}" th:text="${job.statusLabel()}">Status</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+</main>
+
+<footer th:replace="~{fragments/layout :: footer}"></footer>
+</body>
+</html>
