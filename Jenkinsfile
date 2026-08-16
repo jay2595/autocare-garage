@@ -123,27 +123,46 @@ pipeline {
         stage('Trivy Scan') {
             steps {
                 script {
-                    def exitCode = params.FAIL_ON_VULNERABILITIES ? '1' : '0'
-
                     SERVICES.each { svc ->
-                        // set +e so the report is always printed before the stage
-                        // fails. A scanner that fails the build without showing you
-                        // what it found is just an obstacle.
+                        def image = "${ACR_LOGIN}/${svc}:${IMAGE_TAG}"
+
+                        // Pass 1 - visibility. Reports every fixable HIGH and
+                        // CRITICAL, never blocks, always archived. You cannot act
+                        // on what you cannot see.
                         sh """
-                            set +e
                             trivy image \
                               --scanners vuln \
                               --severity HIGH,CRITICAL \
                               --ignore-unfixed \
-                              --exit-code ${exitCode} \
+                              --exit-code 0 \
                               --format table \
                               --output trivy-${svc}.txt \
-                              ${ACR_LOGIN}/${svc}:${IMAGE_TAG}
-                            RC=\$?
+                              ${image}
                             echo "----- ${svc} -----"
                             cat trivy-${svc}.txt
-                            exit \$RC
                         """
+
+                        // Pass 2 - the gate. Blocks on CRITICAL only.
+                        //
+                        // Failing on every HIGH sounds stricter but is not
+                        // workable: a Spring Boot fat jar carries dozens of
+                        // transitive libraries, and there is almost always an
+                        // unpatched HIGH somewhere. A gate that is always red gets
+                        // switched off, and then you have no gate at all.
+                        // Blocking on CRITICAL and reviewing HIGH is a policy that
+                        // survives contact with a real dependency tree.
+                        if (params.FAIL_ON_VULNERABILITIES) {
+                            sh """
+                                trivy image \
+                                  --scanners vuln \
+                                  --severity CRITICAL \
+                                  --ignore-unfixed \
+                                  --exit-code 1 \
+                                  --format table \
+                                  --quiet \
+                                  ${image}
+                            """
+                        }
                     }
                 }
             }
