@@ -1,0 +1,92 @@
+digraph autocare {
+  rankdir=LR;
+  bgcolor="white";
+  pad=0.45; nodesep=0.42; ranksep=0.72;
+  compound=true; newrank=true;
+  fontname="Poppins";
+  labelloc="t"; labeljust="l";
+  label=<<FONT POINT-SIZE="24"><B>AutoCare Garage &#8212; CI/CD to Azure Kubernetes Service</B></FONT><BR ALIGN="LEFT"/><FONT POINT-SIZE="12" COLOR="#666666">Numbered edges = pipeline order&#160;&#160;&#183;&#160;&#160;Dashed = credentials, feedback, image pull&#160;&#160;&#183;&#160;&#160;Grey = end-user traffic</FONT><BR ALIGN="LEFT"/><FONT POINT-SIZE="8"> </FONT><BR ALIGN="LEFT"/>>;
+
+  node [shape=box, style="rounded,filled", fillcolor="white", penwidth=2,
+        fontname="Poppins", fontsize=12, margin="0.24,0.15"];
+  edge [fontname="Poppins", fontsize=10, color="#555555", penwidth=1.4, arrowsize=0.7];
+
+  subgraph cluster_src {
+    label=<<B>  Source  </B>>;
+    fontsize=13; fontcolor="#444444"; color="#bbbbbb"; style="rounded"; penwidth=1.5;
+    dev [label=<<B>Developer</B><BR/><FONT POINT-SIZE="10" COLOR="#666666">git push</FONT>>, color="#8a8a8a"];
+    gh  [label=<<B>GitHub</B><BR/><FONT POINT-SIZE="10" COLOR="#666666">jay2595/autocare-garage<BR/>3 modules + Jenkinsfiles + k8s/</FONT>>, color="#181717"];
+  }
+
+  subgraph cluster_vm {
+    label=<<B>  Azure VM &#183; jenkins-vm  </B><FONT POINT-SIZE="10">Ubuntu 22.04 &#183; Standard_D2s_v3</FONT>>;
+    fontsize=13; fontcolor="#D24939"; color="#D24939"; style="rounded"; penwidth=1.8;
+    bgcolor="#fdf7f6"; margin=16;
+
+    creds [label=<<B>Jenkins Credentials</B><BR/><FONT POINT-SIZE="10" COLOR="#666666">github-pat &#183; sonar-token<BR/>azure-client-id / secret<BR/>tenant-id / subscription-id</FONT>>, color="#999999", style="rounded,filled,dashed", fillcolor="#f7f7f7"];
+    jenkins [label=<<B>Jenkins</B><BR/><FONT POINT-SIZE="10" COLOR="#666666">:8080 &#183; poll SCM H/5<BR/>autocare-ci &#183; autocare-cd</FONT>>, color="#D24939"];
+    mvn   [label=<<B>Maven + JDK 21</B><BR/><FONT POINT-SIZE="10" COLOR="#666666">one reactor pass<BR/>3 modules &#183; 24 tests</FONT>>, color="#C71A36"];
+    sonar [label=<<B>SonarQube</B><BR/><FONT POINT-SIZE="10" COLOR="#666666">container :9000<BR/>quality gate blocks build</FONT>>, color="#4E9BCD"];
+    docker[label=<<B>Docker Engine</B><BR/><FONT POINT-SIZE="10" COLOR="#666666">3 images &#183; temurin 21-jre<BR/>UID 10001, non-root</FONT>>, color="#2496ED"];
+    trivy [label=<<B>Trivy</B><BR/><FONT POINT-SIZE="10" COLOR="#666666">3 scans &#183; HIGH/CRITICAL<BR/>--ignore-unfixed</FONT>>, color="#1904DA"];
+  }
+
+  subgraph cluster_az {
+    label=<<B>  Azure Subscription &#183; rg-autocare  </B>>;
+    fontsize=13; fontcolor="#0078D4"; color="#0078D4"; style="rounded"; penwidth=1.8;
+    bgcolor="#f5faff"; margin=14;
+
+    acr [label=<<B>Azure Container Registry</B><BR/><FONT POINT-SIZE="10" COLOR="#666666">acrautocarejay2595.azurecr.io<BR/>3 repos &#215; tag &#60;BUILD_NUMBER&#62;</FONT>>, color="#0078D4"];
+
+    subgraph cluster_aks {
+      label=<<B>  AKS &#183; aks-autocare  </B><FONT POINT-SIZE="10">namespace: autocare &#183; 2 nodes</FONT>>;
+      fontsize=12; fontcolor="#326CE5"; color="#326CE5"; style="rounded"; penwidth=1.6;
+      bgcolor="#ffffff"; margin=12;
+
+      api [label=<<B>Kube API server</B><BR/><FONT POINT-SIZE="10" COLOR="#666666">managed control plane</FONT>>, color="#326CE5"];
+      ing [label=<<B>Ingress</B><BR/><FONT POINT-SIZE="10" COLOR="#666666">app routing add-on (NGINX)<BR/>path-based routing</FONT>>, color="#009639"];
+
+      webui [label=<<B>web-ui</B> &#215;2<BR/><FONT POINT-SIZE="10" COLOR="#666666">Thymeleaf + Tailwind :8080<BR/>stateless, no database</FONT>>, color="#6DB33F"];
+      cust  [label=<<B>customers-service</B> &#215;1<BR/><FONT POINT-SIZE="10" COLOR="#666666">:8081 &#183; Customer, Vehicle<BR/>H2 in-memory</FONT>>, color="#6DB33F"];
+      work  [label=<<B>workshop-service</B> &#215;1<BR/><FONT POINT-SIZE="10" COLOR="#666666">:8082 &#183; Mechanic, ServiceJob<BR/>H2 in-memory</FONT>>, color="#6DB33F"];
+    }
+
+    lb [label=<<B>Azure Load Balancer</B><BR/><FONT POINT-SIZE="10" COLOR="#666666">public IP</FONT>>, color="#0078D4", fillcolor="#eef6fd"];
+  }
+
+  user [label=<<B>End user</B><BR/><FONT POINT-SIZE="10" COLOR="#666666">browser</FONT>>, color="#8a8a8a", fillcolor="#f7f7f7"];
+
+  /* source */
+  dev -> gh      [label="  git push  "];
+  gh  -> jenkins [label="  poll SCM  ", color="#181717"];
+  dev -> creds [style=invis];
+  gh  -> creds [style=invis];
+  creds -> jenkins [style=dashed, color="#999999", label="  inject  "];
+
+  /* CI */
+  jenkins -> mvn   [label="  1  build + 24 unit tests  ", color="#D24939"];
+  mvn -> sonar     [label="  2  sonar:sonar  ", color="#4E9BCD"];
+  sonar -> jenkins [label="  3  quality gate (blocks)  ", style=dashed, color="#4E9BCD", constraint=false];
+  mvn -> docker    [label="  4  3 JARs  ", color="#C71A36"];
+  docker -> trivy  [label="  5  scan 3 images  ", color="#1904DA"];
+  trivy -> jenkins [label="  CVE report (blocks)  ", style=dashed, color="#1904DA", constraint=false];
+  docker -> acr    [label="  6  docker push &#215;3  ", color="#2496ED", penwidth=2.2];
+
+  /* CD */
+  jenkins -> api  [label="  7  kubectl apply -f k8s/  ", color="#326CE5", penwidth=2.4];
+  api -> cust     [label="  schedule  ", color="#326CE5"];
+  api -> work     [color="#326CE5"];
+  api -> webui    [color="#326CE5"];
+  acr -> cust     [label="  8  image pull  \n  (AcrPull role)  ", style=dashed, color="#0078D4", penwidth=1.6];
+  api -> jenkins  [label="  9  rollout status + smoke test  ", style=dashed, color="#326CE5", constraint=false];
+
+  /* service to service */
+  work -> cust [label="  GET /api/vehicles/{id}  \n  cluster DNS  ", color="#6DB33F", penwidth=2, constraint=false];
+
+  /* traffic */
+  user -> lb   [label="  HTTP  ", color="#8a8a8a"];
+  lb -> ing    [label="  :80  ", color="#009639"];
+  ing -> webui [label="  /  ", color="#009639"];
+  ing -> cust  [label="  /api/customers  \n  /api/vehicles  ", color="#009639"];
+  ing -> work  [label="  /api/workshop  ", color="#009639"];
+}

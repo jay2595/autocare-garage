@@ -1,7 +1,7 @@
 // AutoCare Garage - Build pipeline (CI)
 //
 // Clone -> build + unit test -> Sonar analysis + quality gate -> Docker images
-// -> Trivy scan -> push to Azure Container Registry.
+// -> Trivy scan -> push to Azure Container Registry -> trigger the CD job.
 //
 // The three services are built in one Maven reactor pass, then each gets its own
 // image, scan and push. Every image is tagged with the Jenkins build number, which
@@ -16,6 +16,25 @@ pipeline {
     tools {
         jdk   'jdk21'
         maven 'maven3'
+    }
+
+    parameters {
+        booleanParam(
+            name: 'FAIL_ON_VULNERABILITIES',
+            defaultValue: true,
+            description: 'Fail the build if Trivy finds fixable HIGH/CRITICAL CVEs.'
+        )
+        booleanParam(
+            name: 'DEPLOY_AFTER_BUILD',
+            defaultValue: true,
+            description: 'Trigger the autocare-cd job with this build number when the build succeeds.'
+        )
+    }
+
+    triggers {
+        // Ask GitHub for new commits every 5 minutes. 'H' spreads the load so
+        // every job on this controller does not poll on the same tick.
+        pollSCM('H/5 * * * *')
     }
 
     options {
@@ -70,11 +89,11 @@ pipeline {
 
         stage('Quality Gate') {
             steps {
-                // Blocks until SonarQube POSTs its verdict to the Jenkins webhook.
-                // abortPipeline:false = report only. Flip to true once you have seen
-                // the gate pass, so a real regression stops the build.
+                // Blocks until SonarQube POSTs its verdict to the Jenkins webhook,
+                // then fails the build if the gate is red. A gate that cannot fail
+                // is not a gate.
                 timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: false
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
@@ -104,21 +123,27 @@ pipeline {
         stage('Trivy Scan') {
             steps {
                 script {
+                    def exitCode = params.FAIL_ON_VULNERABILITIES ? '1' : '0'
+
                     SERVICES.each { svc ->
-                        // --exit-code 0 = report but do not fail the build.
-                        // Change to 1 once you have seen the report and decided
-                        // which findings you are willing to block on.
+                        // set +e so the report is always printed before the stage
+                        // fails. A scanner that fails the build without showing you
+                        // what it found is just an obstacle.
                         sh """
+                            set +e
                             trivy image \
                               --scanners vuln \
                               --severity HIGH,CRITICAL \
                               --ignore-unfixed \
-                              --exit-code 0 \
+                              --exit-code ${exitCode} \
                               --format table \
                               --output trivy-${svc}.txt \
                               ${ACR_LOGIN}/${svc}:${IMAGE_TAG}
+                            RC=\$?
+                            echo "----- ${svc} -----"
+                            cat trivy-${svc}.txt
+                            exit \$RC
                         """
-                        sh "echo '----- ${svc} -----'; cat trivy-${svc}.txt"
                     }
                 }
             }
@@ -157,6 +182,21 @@ pipeline {
                 }
             }
         }
+
+        stage('Trigger CD') {
+            when {
+                expression { return params.DEPLOY_AFTER_BUILD }
+            }
+            steps {
+                // wait:false so CI reports green as soon as the images are pushed.
+                // The deploy is a separate job with its own history and its own
+                // rollback, which is the whole reason CI and CD are split.
+                build job: 'autocare-cd',
+                      parameters: [string(name: 'IMAGE_TAG', value: env.BUILD_NUMBER)],
+                      wait: false
+                echo "Triggered autocare-cd with IMAGE_TAG=${env.BUILD_NUMBER}"
+            }
+        }
     }
 
     post {
@@ -169,8 +209,6 @@ pipeline {
               customers-service:${env.IMAGE_TAG}
               workshop-service:${env.IMAGE_TAG}
               web-ui:${env.IMAGE_TAG}
-
-            Feed tag ${env.IMAGE_TAG} to the CD pipeline to deploy.
             ============================================================
             """.stripIndent()
         }
