@@ -2,13 +2,15 @@
 # Then:                  docker build -t customers-service .
 FROM eclipse-temurin:21-jre-alpine
 
-RUN addgroup -S autocare && adduser -S autocare -G autocare
+# Numeric UID on purpose. Kubernetes runAsNonRoot cannot verify a username,
+# only a UID, and refuses to start the container without one.
+RUN addgroup -S -g 10001 autocare && adduser -S -u 10001 -G autocare autocare
 
 WORKDIR /app
 COPY target/customers-service-*.jar app.jar
 RUN chown -R autocare:autocare /app
 
-USER autocare
+USER 10001
 EXPOSE 8081
 
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0"

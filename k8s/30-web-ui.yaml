@@ -74,6 +74,10 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
+            # Must match the UID baked into the Dockerfile. Kubernetes verifies
+            # non-root by number, never by username.
+            runAsUser: 10001
+            runAsGroup: 10001
             capabilities:
               drop: ["ALL"]
 
