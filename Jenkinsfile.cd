@@ -1,0 +1,216 @@
+// AutoCare Garage - Release pipeline (CD)
+//
+// Takes an image tag produced by the CI pipeline, deploys it to AKS, watches the
+// rollout, and smoke-tests the result through the public ingress. Rolls back
+// automatically if any deployment fails to become healthy.
+//
+// Run it manually with "Build with Parameters", or let CI trigger it.
+
+def DEPLOYMENTS = ['customers-service', 'workshop-service', 'web-ui']
+
+pipeline {
+
+    agent any
+
+    parameters {
+        string(
+            name: 'IMAGE_TAG',
+            defaultValue: '',
+            description: 'CI build number to deploy, e.g. 5. Must already exist in ACR.'
+        )
+        booleanParam(
+            name: 'ROLLBACK_ON_FAILURE',
+            defaultValue: true,
+            description: 'Undo the rollout if any deployment fails to become healthy.'
+        )
+    }
+
+    options {
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        RG        = 'rg-autocare'
+        AKS       = 'aks-autocare'
+        NS        = 'autocare'
+        ACR_LOGIN = 'acrautocarejay2595.azurecr.io'
+    }
+
+    stages {
+
+        stage('Validate input') {
+            steps {
+                script {
+                    if (!params.IMAGE_TAG?.trim()) {
+                        error('IMAGE_TAG is required. Deploying an unspecified version is how you lose track of what is running.')
+                    }
+                    echo "Deploying tag ${params.IMAGE_TAG} to ${env.AKS}/${env.NS}"
+                    currentBuild.displayName = "#${env.BUILD_NUMBER} deploy ${params.IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+                sh 'ls -la k8s/'
+            }
+        }
+
+        stage('Connect to AKS') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'azure-client-id',       variable: 'AZ_CLIENT_ID'),
+                    string(credentialsId: 'azure-client-secret',   variable: 'AZ_CLIENT_SECRET'),
+                    string(credentialsId: 'azure-tenant-id',       variable: 'AZ_TENANT_ID'),
+                    string(credentialsId: 'azure-subscription-id', variable: 'AZ_SUBSCRIPTION_ID')
+                ]) {
+                    // Single quotes: Groovy must not interpolate the secrets into
+                    // the script text, where they would show up in the build log.
+                    sh '''
+                        az login --service-principal \
+                          -u "$AZ_CLIENT_ID" \
+                          -p "$AZ_CLIENT_SECRET" \
+                          --tenant "$AZ_TENANT_ID" \
+                          --only-show-errors > /dev/null
+
+                        az account set --subscription "$AZ_SUBSCRIPTION_ID"
+
+                        az aks get-credentials \
+                          --resource-group "$RG" \
+                          --name "$AKS" \
+                          --overwrite-existing \
+                          --only-show-errors
+                    '''
+                }
+                sh 'kubectl get nodes'
+                sh 'kubectl config current-context'
+            }
+        }
+
+        stage('Verify images exist') {
+            steps {
+                script {
+                    // Fail here with a clear message rather than 20 minutes later
+                    // as an ImagePullBackOff nobody can interpret.
+                    DEPLOYMENTS.each { svc ->
+                        sh """
+                            az acr repository show-tags \
+                              --name \$(echo ${ACR_LOGIN} | cut -d. -f1) \
+                              --repository ${svc} \
+                              --output tsv | grep -qx '${params.IMAGE_TAG}' \
+                            || { echo "Tag ${params.IMAGE_TAG} not found for ${svc} in ACR"; exit 1; }
+                        """
+                    }
+                    echo "All three images exist at tag ${params.IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Apply manifests') {
+            steps {
+                sh """
+                    # Substitute the tag into a throwaway copy. The manifests in git
+                    # keep the placeholder, so the repo never claims a version.
+                    rm -rf k8s-rendered && cp -r k8s k8s-rendered
+                    sed -i 's|__IMAGE_TAG__|${params.IMAGE_TAG}|g' k8s-rendered/*.yaml
+
+                    echo '--- images being applied ---'
+                    grep -h 'image:' k8s-rendered/*.yaml
+
+                    kubectl apply -f k8s-rendered/
+                """
+            }
+        }
+
+        stage('Monitor rollout') {
+            steps {
+                script {
+                    DEPLOYMENTS.each { svc ->
+                        // Blocks until every replica is updated and ready, or fails
+                        // after 4 minutes. This is the stage that turns "applied"
+                        // into "actually running".
+                        sh "kubectl rollout status deployment/${svc} -n ${NS} --timeout=240s"
+                    }
+                }
+                sh "kubectl get pods -n ${NS} -o wide"
+            }
+        }
+
+        stage('Smoke test') {
+            steps {
+                script {
+                    // The ingress IP can take a minute to appear on a fresh cluster.
+                    def ip = ''
+                    timeout(time: 5, unit: 'MINUTES') {
+                        waitUntil(initialRecurrencePeriod: 10000) {
+                            ip = sh(
+                                script: "kubectl get ingress autocare -n ${NS} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'",
+                                returnStdout: true
+                            ).trim()
+                            return ip != ''
+                        }
+                    }
+
+                    env.APP_URL = "http://${ip}"
+                    echo "Ingress address: ${env.APP_URL}"
+
+                    sh """
+                        set -e
+                        echo '--- web-ui health ---'
+                        curl -fsS --retry 10 --retry-delay 5 --retry-connrefused ${env.APP_URL}/actuator/health
+
+                        echo '\\n--- customers-service through ingress ---'
+                        curl -fsS ${env.APP_URL}/api/customers | head -c 200
+
+                        echo '\\n--- workshop-service through ingress ---'
+                        curl -fsS ${env.APP_URL}/api/workshop/jobs/stats
+
+                        echo '\\n--- home page ---'
+                        curl -fsS -o /dev/null -w 'HTTP %{http_code}\\n' ${env.APP_URL}/
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo """
+            ============================================================
+            Deployed tag ${params.IMAGE_TAG} to ${env.AKS}
+
+            Application: ${env.APP_URL}
+            Namespace:   ${env.NS}
+            ============================================================
+            """.stripIndent()
+        }
+
+        failure {
+            script {
+                if (params.ROLLBACK_ON_FAILURE) {
+                    echo 'Deployment failed - rolling back to the previous revision.'
+                    DEPLOYMENTS.each { svc ->
+                        sh "kubectl rollout undo deployment/${svc} -n ${NS} || true"
+                    }
+                    sh "kubectl get pods -n ${NS} || true"
+                } else {
+                    echo 'Deployment failed. ROLLBACK_ON_FAILURE is off, so the cluster is left as-is for inspection.'
+                }
+            }
+        }
+
+        always {
+            // Useful when something went wrong and the pods are already gone.
+            sh "kubectl describe pods -n ${NS} > pod-describe.txt 2>&1 || true"
+            sh "kubectl get events -n ${NS} --sort-by=.lastTimestamp > events.txt 2>&1 || true"
+            archiveArtifacts artifacts: 'pod-describe.txt,events.txt', allowEmptyArchive: true
+
+            sh 'az logout --only-show-errors || true'
+            cleanWs deleteDirs: true, notFailBuild: true
+        }
+    }
+}
